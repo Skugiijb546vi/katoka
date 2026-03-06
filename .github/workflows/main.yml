@@ -1,0 +1,95 @@
+name: گواستنەوەی_سەلامەت_بۆ_سێرڤەر
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'لینکی ڤیدیۆکە لێرە دابنێ'
+        required: true
+      movie_id_input:
+        description: 'ئایدی فیلمەکە یان لینکەکەی (بۆ نموونە: 1589891 یان تەواوی لینکەکەی ڤیدسۆرس)'
+        required: true
+      firebase_section:
+        description: 'ناوی بەشەکە (movies1 یان series1 یان subtitled_movies1)'
+        required: true
+        default: 'movies1'
+
+jobs:
+  upload_and_update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ئامادەکردنی_ئامرازەکان
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg -qq
+          pip install -q yt-dlp curl_cffi huggingface_hub requests
+
+      - name: داونلۆدکردنی_ڤیدیۆ
+        run: |
+          yt-dlp --impersonate chrome \
+                 --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
+                 --retries 50 \
+                 --fragment-retries 50 \
+                 --retry-sleep 10 \
+                 --sleep-requests 0.5 \
+                 --limit-rate 5M \
+                 --skip-unavailable-fragments \
+                 --ignore-errors \
+                 --continue \
+                 --merge-output-format mp4 \
+                 -o "video.mp4" \
+                 "${{ github.event.inputs.video_url }}" || true
+
+      - name: ناردن_بۆ_سێرڤەر_و_نوێکردنەوەی_داتابەیس
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          FIREBASE_SECRET: ${{ secrets.FIREBASE_SECRET }}
+        run: |
+          python3 -c "
+          import os
+          import requests
+          import re
+          from huggingface_hub import HfApi
+
+          raw_id = '${{ github.event.inputs.movie_id_input }}'
+          match = re.search(r'\d+', raw_id)
+          if not match:
+              print('هەڵە: هیچ ژمارەیەک لە ئایدییەکەدا نەدۆزرایەوە!')
+              exit(1)
+          
+          clean_id = match.group()
+          print(f'ئایدی فیلمەکە: {clean_id}')
+
+          file_name = f'film_{clean_id}.mp4'
+          token = os.getenv('HF_TOKEN')
+          fb_secret = os.getenv('FIREBASE_SECRET')
+          repo_id = 'Sarko57/sarko987'
+          section = '${{ github.event.inputs.firebase_section }}'
+
+          api = HfApi()
+          if os.path.exists('video.mp4'):
+              api.upload_file(
+                  path_or_fileobj='video.mp4',
+                  path_in_repo=file_name,
+                  repo_id=repo_id,
+                  repo_type='dataset',
+                  token=token
+              )
+              print('ڤیدیۆکە بە سەرکەوتوویی نێردرا.')
+
+              hf_link = f'https://huggingface.co/datasets/Sarko57/sarko987/resolve/main/{file_name}'
+              
+              # دەرگای فایەربەیس دەکرێتەوە بە بەکارهێنانی کلیلە نهێنییەکە
+              firebase_url = f'https://sarko-43d61-default-rtdb.firebaseio.com/{section}/{clean_id}.json?auth={fb_secret}'
+              data = {'url': hf_link}
+              
+              response = requests.patch(firebase_url, json=data)
+              
+              if response.status_code == 200:
+                  print('داتابەیس بە سەرکەوتوویی نوێکرایەوە! تەنها لینکەکە گۆڕدرا.')
+              else:
+                  print('هەڵە لە نوێکردنەوەی داتابەیس.')
+          else:
+              print('ڤیدیۆکە نەدۆزرایەوە.')
+              exit(1)
+          "
