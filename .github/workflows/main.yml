@@ -7,7 +7,7 @@ on:
         description: 'لینکی ڤیدیۆکە لێرە دابنێ'
         required: true
       movie_id_input:
-        description: 'ئایدی فیلمەکە یان لینکەکەی (بۆ نموونە: 1589891 یان تەواوی لینکەکەی ڤیدسۆرس)'
+        description: 'ئایدی فیلمەکە یان لینکەکەی'
         required: true
       firebase_section:
         description: 'ناوی بەشەکە (movies1 یان series1 یان subtitled_movies1)'
@@ -44,6 +44,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           FIREBASE_SECRET: ${{ secrets.FIREBASE_SECRET }}
+          TMDB_KEY: ${{ secrets.TMDB_KEY }}
         run: |
           python3 -c "
           import os
@@ -63,6 +64,7 @@ jobs:
           file_name = f'film_{clean_id}.mp4'
           token = os.getenv('HF_TOKEN')
           fb_secret = os.getenv('FIREBASE_SECRET')
+          tmdb_key = os.getenv('TMDB_KEY')
           repo_id = 'Sarko57/sarko987'
           section = '${{ github.event.inputs.firebase_section }}'
 
@@ -80,33 +82,51 @@ jobs:
               hf_link = f'https://huggingface.co/datasets/Sarko57/sarko987/resolve/main/{file_name}'
               firebase_node_url = f'https://sarko-43d61-default-rtdb.firebaseio.com/{section}/{clean_id}.json?auth={fb_secret}'
               
-              # ١. سەرەتا زانیارییەکانی ئێستا دەخوێنینەوە
+              # ١. هێنانی هەڵسەنگاندن 
+              fetched_imdb = 0.0
+              if tmdb_key:
+                  tmdb_url = f'https://api.themoviedb.org/3/movie/{clean_id}?api_key={tmdb_key}'
+                  res = requests.get(tmdb_url)
+                  if res.status_code == 200:
+                      fetched_imdb = round(res.json().get('vote_average', 0.0), 1)
+                  else:
+                      tmdb_url_tv = f'https://api.themoviedb.org/3/tv/{clean_id}?api_key={tmdb_key}'
+                      res_tv = requests.get(tmdb_url_tv)
+                      if res_tv.status_code == 200:
+                          fetched_imdb = round(res_tv.json().get('vote_average', 0.0), 1)
+              
+              print(f'نرخی هەڵسەنگاندن دۆزرایەوە: {fetched_imdb}')
+
+              # ٢. سەرەتا زانیارییەکانی ئێستا دەخوێنینەوە
               get_response = requests.get(firebase_node_url)
               current_data = get_response.json()
               if current_data is None:
                   current_data = {}
                   
-              # ٢. ئەو داتایانەی کە دڵنیاین دەبێت بنێردرێن (وەک لینکەکە)
+              # ٣. ئەو داتایانەی کە دڵنیاین دەبێت بنێردرێن
               patch_data = {'url': hf_link}
               
-              # ٣. لیستی ئەو کلیلانەی کە پێویستن و بەها بنەڕەتییەکانیان
+              # ئەگەر نرخەکە سفر نەبوو یان پێشتر نەنووسرابوو، تازەی دەکەینەوە
+              if 'imdb' not in current_data or current_data['imdb'] == 0.0 or current_data['imdb'] == 0:
+                  patch_data['imdb'] = fetched_imdb
+              
+              # ٤. لیستی ئەو کلیلانەی کە پێویستن و بەها بنەڕەتییەکانیان
               required_keys = {
                   'subtitleKurdish': '',
                   'subtitleEnglish': '',
-                  'imdb': 0.0,
                   'hasSubtitle': False,
                   'description': '',
                   'badge_text': '',
                   'introEndTime': 0
               }
               
-              # ٤. پشکنین دەکەین، ئەگەر هەر کلیلێک لەناو داتاکەی ئێستادا نەبوو، بۆی زیاد دەکەین
+              # ٥. پشکنین دەکەین، ئەگەر هەر کلیلێک نەبوو، بۆی زیاد دەکەین
               for key, default_value in required_keys.items():
                   if key not in current_data:
                       patch_data[key] = default_value
                       print(f'کلیلی کەمبوو زیادکرا: {key}')
               
-              # ٥. لە کۆتاییدا داتاکان بە سەلامەتی نوێ دەکەینەوە
+              # ٦. لە کۆتاییدا داتاکان بە سەلامەتی نوێ دەکەینەوە
               response = requests.patch(firebase_node_url, json=patch_data)
               
               if response.status_code == 200:
