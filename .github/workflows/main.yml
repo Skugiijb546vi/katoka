@@ -12,7 +12,7 @@ on:
       firebase_section:
         description: 'ناوی بەشەکە (movies1 یان series1 یان subtitled_movies1)'
         required: true
-        default: 'movies1'
+        default: 'subtitled_movies1'
 
 jobs:
   upload_and_update:
