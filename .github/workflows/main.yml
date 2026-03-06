@@ -40,7 +40,7 @@ jobs:
                  -o "video.mp4" \
                  "${{ github.event.inputs.video_url }}" || true
 
-      - name: ناردن_بۆ_سێرڤەر_و_نوێکردنەوەی_داتابەیس
+      - name: ناردن_بۆ_سێرڤەر_و_پشکنینی_داتابەیس
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           FIREBASE_SECRET: ${{ secrets.FIREBASE_SECRET }}
@@ -78,15 +78,39 @@ jobs:
               print('ڤیدیۆکە بە سەرکەوتوویی نێردرا.')
 
               hf_link = f'https://huggingface.co/datasets/Sarko57/sarko987/resolve/main/{file_name}'
+              firebase_node_url = f'https://sarko-43d61-default-rtdb.firebaseio.com/{section}/{clean_id}.json?auth={fb_secret}'
               
-              # دەرگای فایەربەیس دەکرێتەوە بە بەکارهێنانی کلیلە نهێنییەکە
-              firebase_url = f'https://sarko-43d61-default-rtdb.firebaseio.com/{section}/{clean_id}.json?auth={fb_secret}'
-              data = {'url': hf_link}
+              # ١. سەرەتا زانیارییەکانی ئێستا دەخوێنینەوە
+              get_response = requests.get(firebase_node_url)
+              current_data = get_response.json()
+              if current_data is None:
+                  current_data = {}
+                  
+              # ٢. ئەو داتایانەی کە دڵنیاین دەبێت بنێردرێن (وەک لینکەکە)
+              patch_data = {'url': hf_link}
               
-              response = requests.patch(firebase_url, json=data)
+              # ٣. لیستی ئەو کلیلانەی کە پێویستن و بەها بنەڕەتییەکانیان
+              required_keys = {
+                  'subtitleKurdish': '',
+                  'subtitleEnglish': '',
+                  'imdb': 0.0,
+                  'hasSubtitle': False,
+                  'description': '',
+                  'badge_text': '',
+                  'introEndTime': 0
+              }
+              
+              # ٤. پشکنین دەکەین، ئەگەر هەر کلیلێک لەناو داتاکەی ئێستادا نەبوو، بۆی زیاد دەکەین
+              for key, default_value in required_keys.items():
+                  if key not in current_data:
+                      patch_data[key] = default_value
+                      print(f'کلیلی کەمبوو زیادکرا: {key}')
+              
+              # ٥. لە کۆتاییدا داتاکان بە سەلامەتی نوێ دەکەینەوە
+              response = requests.patch(firebase_node_url, json=patch_data)
               
               if response.status_code == 200:
-                  print('داتابەیس بە سەرکەوتوویی نوێکرایەوە! تەنها لینکەکە گۆڕدرا.')
+                  print('داتابەیس بە سەرکەوتوویی و زیرەکانە نوێکرایەوە!')
               else:
                   print('هەڵە لە نوێکردنەوەی داتابەیس.')
           else:
